@@ -2,9 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Important Rules
+
+- **Always run tests with report generation.** Never run tests without the full `pytest_sessionfinish` report pipeline. Use the commands below as-is — do not add flags that suppress output or skip session teardown.
+
 ## Commands
 
-**Install dependencies** (requires Python 3.10+):
+**Install dependencies** (requires Python 3.11+):
 ```bash
 pip3.11 install -r requirements.txt
 ```
