@@ -32,6 +32,7 @@ def pytest_collection_modifyitems(items):
 
 _report_results = []
 _persona_results = []
+_structured_results = []
 
 
 @pytest.fixture(scope="session")
@@ -44,6 +45,11 @@ def persona_results():
     return _persona_results
 
 
+@pytest.fixture(scope="session")
+def structured_results():
+    return _structured_results
+
+
 # ------------------------------------------------------------------
 # HTML report — written once after all tests finish
 # ------------------------------------------------------------------
@@ -51,8 +57,9 @@ def persona_results():
 def pytest_sessionfinish(session, exitstatus):
     results = _report_results
     personas = _persona_results
+    structured = _structured_results
 
-    if not results and not personas:
+    if not results and not personas and not structured:
         return
 
     def score_color(passed):
@@ -85,6 +92,13 @@ def pytest_sessionfinish(session, exitstatus):
                 f'{name}: {score_str}</span>'
             )
 
+        sim = r.get("similarity")
+        if sim is not None:
+            sim_color = "#2ecc71" if sim >= 0.90 else ("#f39c12" if sim >= 0.70 else "#e74c3c")
+            sim_badge = f'<span style="background:{sim_color};color:white;padding:3px 8px;border-radius:4px;font-size:13px">{sim:.2f}</span>'
+        else:
+            sim_badge = "<span style='color:#aaa'>N/A</span>"
+
         cat_color = CATEGORY_COLORS.get(r["category"], "#aaa")
         cat_badge = f'<span style="background:{cat_color};color:white;padding:2px 8px;border-radius:4px;font-size:12px">{r["category"]}</span>'
         result_color = score_color(r["passed"])
@@ -95,6 +109,7 @@ def pytest_sessionfinish(session, exitstatus):
           <td>{r['input']}</td>
           <td>{r['actual_output']}</td>
           <td>{r['expected_output']}</td>
+          <td>{sim_badge}</td>
           <td>{badges}</td>
           <td style="color:{result_color};font-weight:bold">{result_text}</td>
         </tr>"""
@@ -143,6 +158,53 @@ def pytest_sessionfinish(session, exitstatus):
     {persona_rows}
   </table>"""
 
+    # --- Structured output table ---
+    structured_rows = ""
+    for r in structured:
+        valid_badge = (
+            '<span style="background:#2ecc71;color:white;padding:2px 8px;border-radius:4px">Valid JSON</span>'
+            if r["json_valid"] else
+            '<span style="background:#e74c3c;color:white;padding:2px 8px;border-radius:4px">Invalid JSON</span>'
+        )
+        key_checks = ""
+        for key, (actual_val, expected_val, match) in r["key_matches"].items():
+            color = "#2ecc71" if match else "#e74c3c"
+            key_checks += (
+                f'<div style="font-size:12px;margin:2px 0">'
+                f'<strong>{key}:</strong> '
+                f'<span style="color:{color}">{actual_val!r}</span>'
+                f'</div>'
+            )
+        result_color = score_color(r["passed"])
+        result_text = "PASS" if r["passed"] else "FAIL"
+        structured_rows += f"""
+        <tr>
+          <td>{r['input']}</td>
+          <td><code style="font-size:12px;word-break:break-all">{r['actual_output']}</code></td>
+          <td>{valid_badge}</td>
+          <td>{key_checks}</td>
+          <td style="color:{result_color};font-weight:bold">{result_text}</td>
+        </tr>"""
+
+    structured_section = ""
+    if structured_rows:
+        structured_section = f"""
+  <h2>Structured Output Tests</h2>
+  <p style="color:#555;font-size:14px">
+    Tests that require the model to return valid JSON in a specific shape.
+    If JSON is invalid, the test fails immediately — no judge is called.
+  </p>
+  <table>
+    <tr>
+      <th>Input</th>
+      <th>Raw Output</th>
+      <th>JSON Valid</th>
+      <th>Key Checks</th>
+      <th>Result</th>
+    </tr>
+    {structured_rows}
+  </table>"""
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -181,13 +243,16 @@ def pytest_sessionfinish(session, exitstatus):
       <th>Input</th>
       <th>Actual Output</th>
       <th>Expected Output</th>
-      <th>Scores</th>
+      <th>Similarity</th>
+      <th>Judge Scores</th>
       <th>Result</th>
     </tr>
     {rows}
   </table>
 
   {persona_section}
+
+  {structured_section}
 </body>
 </html>"""
 

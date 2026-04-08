@@ -8,6 +8,34 @@ Each entry has:
   - category:        one of happy_path | edge_case | negative | ambiguous | robustness
 """
 
+STRUCTURED_SET = [
+    {
+        "category": "structured",
+        "input": 'Answer only in JSON format: {"city": "...", "country": "..."}. What is the capital of France?',
+        "expected_json": {"city": "Paris", "country": "France"},
+    },
+    {
+        "category": "structured",
+        "input": 'Answer only in JSON format: {"expression": "...", "result": 0}. What is 2 + 2?',
+        "expected_json": {"expression": "2 + 2", "result": 4},
+    },
+    {
+        "category": "structured",
+        "input": 'Answer only in JSON format: {"title": "...", "author": "..."}. Who wrote Hamlet?',
+        "expected_json": {"title": "Hamlet", "author": "William Shakespeare"},
+    },
+    {
+        "category": "structured",
+        "input": 'Answer only in JSON format: {"acronym": "...", "full_name": "..."}. What does RAG stand for in AI?',
+        "expected_json": {"acronym": "RAG", "full_name": "Retrieval-Augmented Generation"},
+    },
+    {
+        "category": "structured",
+        "input": 'Answer only in JSON format: {"term": "...", "definition": "..."}. What is a large language model?',
+        "expected_json": {"term": "large language model", "definition": "..."},
+    },
+]
+
 GOLDEN_SET = [
     # ------------------------------------------------------------------
     # Happy Path — standard, clear questions with unambiguous answers
