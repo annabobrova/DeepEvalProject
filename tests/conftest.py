@@ -33,6 +33,7 @@ def pytest_collection_modifyitems(items):
 _report_results = []
 _persona_results = []
 _structured_results = []
+_hallucination_results = []
 
 
 @pytest.fixture(scope="session")
@@ -50,6 +51,11 @@ def structured_results():
     return _structured_results
 
 
+@pytest.fixture(scope="session")
+def hallucination_results():
+    return _hallucination_results
+
+
 # ------------------------------------------------------------------
 # HTML report — written once after all tests finish
 # ------------------------------------------------------------------
@@ -58,8 +64,9 @@ def pytest_sessionfinish(session, exitstatus):
     results = _report_results
     personas = _persona_results
     structured = _structured_results
+    hallucinations = _hallucination_results
 
-    if not results and not personas and not structured:
+    if not results and not personas and not structured and not hallucinations:
         return
 
     def score_color(passed):
@@ -114,8 +121,9 @@ def pytest_sessionfinish(session, exitstatus):
           <td style="color:{result_color};font-weight:bold">{result_text}</td>
         </tr>"""
 
-    total = len(results)
-    passed_count = sum(1 for r in results if r["passed"])
+    all_results = results + hallucinations
+    total = len(all_results)
+    passed_count = sum(1 for r in all_results if r["passed"])
     summary_class = "pass" if passed_count == total else "fail"
 
     # --- Judge persona comparison table ---
@@ -205,6 +213,67 @@ def pytest_sessionfinish(session, exitstatus):
     {structured_rows}
   </table>"""
 
+    # --- Hallucination results table ---
+    hallucination_rows = ""
+    for r in hallucinations:
+        answerable_color = "#3498db" if r["answerable"] else "#9b59b6"
+        answerable_label = "answerable" if r["answerable"] else "unanswerable"
+        answerable_badge = (
+            f'<span style="background:{answerable_color};color:white;padding:2px 8px;'
+            f'border-radius:4px;font-size:12px">{answerable_label}</span>'
+        )
+        badges = ""
+        for name, score, passed in r["scores"]:
+            color = score_color(passed)
+            score_str = f"{score:.2f}" if score is not None else "N/A"
+            badges += (
+                f'<span style="background:{color};color:white;padding:3px 8px;'
+                f'border-radius:4px;margin:2px;display:inline-block;font-size:13px">'
+                f'{name}: {score_str}</span>'
+            )
+        sim = r.get("similarity")
+        if sim is not None:
+            sim_color = "#2ecc71" if sim >= 0.90 else ("#f39c12" if sim >= 0.70 else "#e74c3c")
+            sim_badge = f'<span style="background:{sim_color};color:white;padding:3px 8px;border-radius:4px;font-size:13px">{sim:.2f}</span>'
+        else:
+            sim_badge = "<span style='color:#aaa'>N/A</span>"
+        result_color = score_color(r["passed"])
+        result_text = "PASS" if r["passed"] else "FAIL"
+        hallucination_rows += f"""
+        <tr>
+          <td>{answerable_badge}</td>
+          <td>{r['input']}</td>
+          <td>{r['actual_output']}</td>
+          <td>{r['expected_output']}</td>
+          <td>{sim_badge}</td>
+          <td>{badges}</td>
+          <td style="color:{result_color};font-weight:bold">{result_text}</td>
+        </tr>"""
+
+    hallucination_section = ""
+    if hallucination_rows:
+        hal_total = len(hallucinations)
+        hal_passed = sum(1 for r in hallucinations if r["passed"])
+        hallucination_section = f"""
+  <h2>RAG Hallucination Tests ({hal_passed}/{hal_total} passed)</h2>
+  <p style="color:#555;font-size:14px">
+    The model is grounded in Anna's resume as the retrieved context document.
+    <strong style="color:#3498db">Answerable</strong> questions test faithfulness — the model must answer correctly from the document.
+    <strong style="color:#9b59b6">Unanswerable</strong> questions test anti-hallucination — the model must say "not mentioned" instead of guessing.
+  </p>
+  <table>
+    <tr>
+      <th>Type</th>
+      <th>Input</th>
+      <th>Actual Output</th>
+      <th>Expected Output</th>
+      <th>Similarity</th>
+      <th>Judge Scores</th>
+      <th>Result</th>
+    </tr>
+    {hallucination_rows}
+  </table>"""
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -253,6 +322,8 @@ def pytest_sessionfinish(session, exitstatus):
   {persona_section}
 
   {structured_section}
+
+  {hallucination_section}
 </body>
 </html>"""
 

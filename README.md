@@ -18,7 +18,9 @@ A production-style evaluation framework for testing Large Language Models using 
 
 - **How to calibrate metric thresholds for your use case.** A general assistant intentionally gives more information than strictly asked. `AnswerRelevancyMetric` at a strict threshold (0.7) penalizes this — a correct, helpful answer fails because it adds context. Lowering the threshold to 0.5 for a general assistant reflects the actual use case. This teaches that metrics and thresholds are not universal — they must match what "good" means for your specific model's purpose.
 
-- **How to generate an HTML evaluation report.** After every test run, the framework automatically produces a `report.html` file showing overall pass rates, per-category breakdowns, semantic similarity scores, and a side-by-side judge persona comparison. This makes results easy to share and review without needing to read terminal output.
+- **How to test a RAG pipeline for hallucination.** In a RAG system, the model receives retrieved documents as context and must answer only from them. This project uses Anna's actual resume as the retrieved document and tests two failure modes: (1) answerable questions — the model must stay faithful to what the resume says and not embellish; (2) unanswerable questions — the model must say "not mentioned" instead of guessing. `FaithfulnessMetric` is the primary metric here: it scores whether every claim in the model's answer is grounded in the retrieved context. A model that invents a salary expectation or fabricates AWS experience will fail this metric even if the answer sounds plausible.
+
+- **How to generate an HTML evaluation report.** After every test run, the framework automatically produces a `report.html` file showing overall pass rates, per-category breakdowns, semantic similarity scores, a side-by-side judge persona comparison, and a RAG hallucination table. This makes results easy to share and review without needing to read terminal output.
 
 - **How to run tests selectively using pytest markers.** Each test case is tagged with its category. You can run only `happy_path` tests, only `structured` tests, or combine and exclude categories using boolean expressions (`-m "edge_case or negative"`, `-m "not ambiguous"`). This is useful when iterating quickly — you don't need to run the full suite to check one category.
 
@@ -49,15 +51,19 @@ Both are configurable via environment variables.
 ```
 DeepEvalProject/
 ├── datasets/
-│   └── golden_set.py         # 14 golden set + 5 structured output test cases
+│   └── golden_set.py              # 14 golden set + 5 structured output test cases
+├── rag/
+│   ├── documents/
+│   │   └── resume.py              # Anna's resume chunked into retrievable facts (RAG context)
+│   └── hallucination_set.py       # 10 RAG test cases: 5 answerable + 5 unanswerable
 ├── tests/
-│   ├── conftest.py           # pytest hooks, fixtures, HTML report generation
-│   └── test_golden_set.py    # eval tests, judge persona tests, structured output tests
-├── config.py                 # shared Anthropic client and model name config
-├── model.py                  # thin wrapper: generate(prompt) → str
-├── judge.py                  # ClaudeJudge, ElementaryStudentJudge, FactCheckerJudge
-├── similarity.py             # cosine similarity via sentence-transformers
-├── pytest.ini                # category marker registration
+│   ├── conftest.py                # pytest hooks, fixtures, HTML report generation
+│   └── test_golden_set.py         # eval tests, judge persona tests, structured output, RAG tests
+├── config.py                      # shared Anthropic client and model name config
+├── model.py                       # thin wrapper: generate(prompt, system) → str
+├── judge.py                       # ClaudeJudge, ElementaryStudentJudge, FactCheckerJudge
+├── similarity.py                  # cosine similarity via sentence-transformers
+├── pytest.ini                     # category marker registration
 ├── requirements.txt
 └── .env
 ```
@@ -74,15 +80,16 @@ The dataset is structured into 5 categories, each testing a different model beha
 | `ambiguous` | Underspecified questions requiring clarification | "What's the best one?" |
 | `robustness` | Same question phrased differently — tests consistency | "Tell me about the capital of France." vs "Which city is the capital of France?" |
 | `structured` | Model must return valid JSON in a specific shape | `{"city": "Paris", "country": "France"}` |
+| `hallucination` | RAG faithfulness and anti-hallucination using a real resume | "Does the candidate have AWS experience?" → must say "not mentioned" |
 
 ## Metrics
 
 | Metric | What it measures | Threshold | Applied to |
 |---|---|---|---|
-| `AnswerRelevancyMetric` | Does the response address the question? | 0.5 (relaxed for general assistant) | All examples |
-| `GEval (Correctness)` | Is the response factually correct vs. expected output? | 0.7 | All examples |
-| `FaithfulnessMetric` | Does the response stay grounded in context (no hallucination)? | 0.7 | Examples with context only |
-| `SemanticSimilarity` | Cosine similarity between actual and expected output (local, no API) | Display only | All examples |
+| `AnswerRelevancyMetric` | Does the response address the question? | 0.5 (relaxed for general assistant) | Golden set |
+| `GEval (Correctness)` | Is the response factually correct vs. expected output? | 0.7 | Golden set + RAG |
+| `FaithfulnessMetric` | Does the response stay grounded in context (no hallucination)? | 0.7 | Examples with context + RAG |
+| `SemanticSimilarity` | Cosine similarity between actual and expected output (local, no API) | Display only | Golden set + RAG |
 
 > **Note on AnswerRelevancyMetric threshold:** A general assistant intentionally adds context beyond the question. A strict threshold penalizes this correct behavior. The threshold is set to 0.5 here to reflect the use case. For a focused agent (customer support bot, RAG system), a stricter threshold like 0.8+ would be appropriate.
 
@@ -119,6 +126,37 @@ The test flow:
 
 This teaches contract validation: before asking "is the answer good?", ask "is the answer in the right shape?"
 
+## RAG hallucination testing
+
+In a RAG pipeline, the model receives retrieved documents as context and must answer only from them. The `hallucination` category tests this using Anna's actual resume as the retrieved document.
+
+There are two types of test cases:
+
+**Answerable** — the resume contains the answer. The model must stay faithful to what is written; it must not add credentials, dates, or roles that are not there.
+
+```python
+input:           "What programming languages does the candidate know?"
+expected_output: "According to the resume, the candidate knows Python, Java, TypeScript, and SQL."
+context:         RESUME_CONTEXT  # the resume chunks
+```
+
+**Unanswerable** — the resume does not contain the answer. The model must acknowledge the gap rather than guess. Hallucination risk is highest here.
+
+```python
+input:           "Does the candidate have AWS experience?"
+expected_output: "The resume does not mention AWS experience."
+context:         RESUME_CONTEXT
+```
+
+The model is grounded via the system prompt:
+```
+"Answer only from this document. If the document does not contain the answer, say so clearly — do not guess."
+```
+
+`FaithfulnessMetric` is the primary judge: it checks whether every claim in the actual output is supported by the retrieval context. A model that invents a salary expectation or fabricates AWS skills will fail even if the answer sounds plausible.
+
+**Notable finding from the run:** The judge initially failed the certifications question because it thought future-looking dates (December 2025, April 2026) meant the certifications had not been obtained yet — the judge's training cutoff made it treat those dates as still in the future. Fixing the context to say "completed December 2025" resolved it. This is a real-world example of **judge date-awareness causing false negatives** — a calibration issue worth checking in any eval that involves dates.
+
 ## Semantic similarity
 
 Each test also computes a cosine similarity score using `sentence-transformers` (`all-MiniLM-L6-v2`) — a small model that runs locally in milliseconds with no API cost.
@@ -152,6 +190,7 @@ python3.11 -m pytest tests/test_golden_set.py -v -s
 # Run only a specific category
 python3.11 -m pytest tests/test_golden_set.py -v -s -m happy_path
 python3.11 -m pytest tests/test_golden_set.py -v -s -m structured
+python3.11 -m pytest tests/test_golden_set.py -v -s -m hallucination
 python3.11 -m pytest tests/test_golden_set.py -v -s -m "edge_case or negative"
 python3.11 -m pytest tests/test_golden_set.py -v -s -m "not ambiguous"
 
@@ -164,6 +203,7 @@ After each run, `report.html` opens automatically in your browser with:
 - Full results table with actual vs. expected output, semantic similarity score, and judge metric scores
 - Judge Persona Comparison table (happy_path) — ElementaryStudentJudge vs. FactCheckerJudge side by side
 - Structured Output table — JSON validity and per-key match results
+- RAG Hallucination table — answerable vs. unanswerable rows, FaithfulnessMetric and GEval scores
 
 ## Key concepts
 
@@ -178,3 +218,6 @@ After each run, `report.html` opens automatically in your browser with:
 | **Semantic similarity** | Math-based score (cosine similarity) measuring how close two texts are in meaning — fast and free |
 | **Structured output** | Requiring the model to return JSON — validated before the judge is called |
 | **Category markers** | pytest marks (`-m happy_path`) that let you run a subset of tests |
+| **RAG** | Retrieval-Augmented Generation — model answers using retrieved documents as context |
+| **Hallucination** | When a model invents facts not present in the context — caught by FaithfulnessMetric |
+| **Unanswerable question** | A question the context cannot answer — the model must say "not mentioned", not guess |

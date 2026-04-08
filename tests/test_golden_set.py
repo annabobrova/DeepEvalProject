@@ -6,6 +6,7 @@ from deepeval.test_case import LLMTestCase, LLMTestCaseParams
 from deepeval.metrics import AnswerRelevancyMetric, FaithfulnessMetric, GEval
 
 from datasets.golden_set import GOLDEN_SET, STRUCTURED_SET
+from rag.hallucination_set import HALLUCINATION_SET
 from model import generate
 from judge import ClaudeJudge, LinguistJudge, FactCheckerJudge
 from similarity import compute as semantic_similarity
@@ -146,3 +147,59 @@ def test_structured_output(example, structured_results):
 
     assert json_valid, f"Model did not return valid JSON. Got: {actual_output}"
     assert all(v[2] for v in key_matches.values()), f"Key mismatches: {key_matches}"
+
+
+@pytest.mark.parametrize("example", HALLUCINATION_SET)
+@pytest.mark.hallucination
+def test_hallucination(example, hallucination_results):
+    judge = ClaudeJudge()
+    faithfulness = FaithfulnessMetric(threshold=METRIC_THRESHOLD, model=judge)
+    correctness = GEval(
+        name="Correctness",
+        criteria="Determine whether the actual output is factually correct compared to the expected output.",
+        evaluation_params=[
+            LLMTestCaseParams.INPUT,
+            LLMTestCaseParams.ACTUAL_OUTPUT,
+            LLMTestCaseParams.EXPECTED_OUTPUT,
+        ],
+        threshold=METRIC_THRESHOLD,
+        verbose_mode=True,
+        model=judge,
+    )
+
+    context_text = "\n".join(example["context"])
+    system_prompt = (
+        "You are a helpful assistant answering questions based only on the provided document. "
+        "If the document does not contain the answer, say so clearly — do not guess or invent information.\n\n"
+        f"Document:\n{context_text}"
+    )
+    actual_output = generate(example["input"], system=system_prompt)
+    sim_score = semantic_similarity(actual_output, example["expected_output"])
+
+    test_case = LLMTestCase(
+        input=example["input"],
+        actual_output=actual_output,
+        expected_output=example["expected_output"],
+        retrieval_context=example["context"],
+    )
+
+    metrics = [faithfulness, correctness]
+
+    answerable_label = "answerable" if example["answerable"] else "unanswerable"
+    print(f"\n[hallucination/{answerable_label}] {example['input'][:60]}")
+    print(f"  SemanticSimilarity: {sim_score:.2f}")
+    for m in metrics:
+        m.measure(test_case)
+        print(f"  {m.__class__.__name__}: {m.score:.2f} ({'PASS' if m.is_successful() else 'FAIL'})")
+
+    hallucination_results.append({
+        "input": example["input"],
+        "actual_output": actual_output,
+        "expected_output": example["expected_output"],
+        "answerable": example["answerable"],
+        "scores": [(m.__class__.__name__, m.score, m.is_successful()) for m in metrics],
+        "similarity": sim_score,
+        "passed": all(m.is_successful() for m in metrics),
+    })
+
+    assert_test(test_case, metrics)
