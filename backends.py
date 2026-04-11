@@ -4,7 +4,7 @@ import subprocess
 import urllib.request
 
 # Set via MODEL_BACKEND env var. Add new backend names here as they are supported.
-MODEL_BACKEND = os.getenv("MODEL_BACKEND", "claude")
+MODEL_BACKEND = os.getenv("MODEL_BACKEND", "opencode_api")
 
 _OPENCODE_ZEN_URL = "https://opencode.ai/zen/v1/messages"
 _OPENCODE_ZEN_MODEL = os.getenv("OPENCODE_MODEL", "big-pickle")
@@ -23,11 +23,14 @@ def _run_claude(prompt: str, system: str, timeout: int) -> str:
     cmd = ["claude", "-p", prompt]
     if system:
         cmd += ["--system-prompt", system]
-    result = subprocess.run(
-        cmd,
-        capture_output=True, text=True, timeout=timeout,
-        env=_env_without_api_key(),
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True, text=True, timeout=timeout,
+            env=_env_without_api_key(),
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"claude CLI timed out after {timeout}s")
     if result.returncode != 0:
         raise RuntimeError(
             f"claude CLI exited with code {result.returncode}. stderr: {result.stderr.strip()}"
@@ -37,11 +40,14 @@ def _run_claude(prompt: str, system: str, timeout: int) -> str:
 
 def _run_opencode(prompt: str, system: str, timeout: int) -> str:
     full_prompt = f"{system}\n\n{prompt}" if system else prompt
-    result = subprocess.run(
-        ["opencode", "run", full_prompt, "--format", "json", "--agent", "general"],
-        capture_output=True, text=True, timeout=timeout,
-        env=_env_without_api_key(),
-    )
+    try:
+        result = subprocess.run(
+            ["opencode", "run", full_prompt, "--format", "json", "--agent", "general"],
+            capture_output=True, text=True, timeout=timeout,
+            env=_env_without_api_key(),
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"opencode CLI timed out after {timeout}s")
     if result.returncode != 0:
         raise RuntimeError(
             f"opencode exited with code {result.returncode}. stderr: {result.stderr.strip()}"

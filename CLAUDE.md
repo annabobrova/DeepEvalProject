@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Always run tests with report generation.** Never run tests without the full `pytest_sessionfinish` report pipeline. Use the commands below as-is — do not add flags that suppress output or skip session teardown.
 - **Always update README.md after code changes.** Any change to architecture, file structure, backends, metrics, or test design must be reflected in README.md before the task is considered done.
+- **Speak up if a requested approach is not the best solution.** If a better alternative exists, say so before implementing.
+- **Keep the project simple and easy to read.** Push back on any change that adds complexity without clear necessity. This project is a learning tool — clarity matters more than completeness.
 
 ## Commands
 
@@ -54,7 +56,7 @@ expected_output ──────────→ judge.py (LLMJudge / OpenCode 
 **Environment:**
 Optional `.env` overrides:
 ```
-MODEL_BACKEND=claude            # default; "opencode_api" for OpenCode Zen direct API (free tier)
+MODEL_BACKEND=opencode_api      # default; "claude" to use Claude Code CLI via subscription OAuth
 MODEL_NAME=claude               # display label only
 JUDGE_MODEL_NAME=claude         # display label only
 ```

@@ -343,8 +343,10 @@ def pytest_sessionfinish(session, exitstatus):
 </html>"""
 
     report_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "report.html"))
-    with open(report_path, "w") as f:
-        f.write(html)
-
-    webbrowser.open(f"file://{report_path}")
-    print(f"\n✅ Report saved to {report_path}")
+    try:
+        with open(report_path, "w") as f:
+            f.write(html)
+        webbrowser.open(f"file://{report_path}")
+        print(f"\n✅ Report saved to {report_path}")
+    except Exception as e:
+        print(f"\n⚠️  Failed to write report: {e}")
