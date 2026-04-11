@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Important Rules
 
 - **Always run tests with report generation.** Never run tests without the full `pytest_sessionfinish` report pipeline. Use the commands below as-is — do not add flags that suppress output or skip session teardown.
+- **Always update README.md after code changes.** Any change to architecture, file structure, backends, metrics, or test design must be reflected in README.md before the task is considered done.
 
 ## Commands
 
@@ -25,31 +26,35 @@ python3.11 -m pytest "tests/test_golden_set.py::test_model_on_golden_set[example
 
 ## Architecture
 
-This project evaluates an LLM (model under test) using DeepEval metrics, scored by a second LLM acting as a judge.
+This project evaluates an LLM (model under test) using DeepEval metrics, scored by a second LLM acting as a judge. Both the model and judge call the CLI via subprocess — no direct API calls are made.
 
 **Flow:**
 ```
-Input → model.py (Claude Haiku) → actual_output
+Input → model.py (OpenCode CLI) → actual_output
                                         ↓
-expected_output ──────────→ judge.py (ClaudeJudge) → score + reason
+expected_output ──────────→ judge.py (LLMJudge / OpenCode CLI) → score + reason
 ```
 
 **Key files and their roles:**
-- `config.py` — single source of truth for the shared Anthropic client and model names. Both `model.py` and `judge.py` import from here. Model names can be overridden via `MODEL_NAME` / `JUDGE_MODEL_NAME` env vars.
-- `model.py` — thin wrapper around the Anthropic API; `generate(prompt)` is the only function.
-- `judge.py` — `ClaudeJudge` subclasses `DeepEvalBaseLLM` to plug Claude into DeepEval's metric scoring pipeline.
-- `datasets/golden_set.py` — the ground truth dataset. Each entry has `input`, `expected_output`, and optional `context` (used for `FaithfulnessMetric`).
-- `tests/test_golden_set.py` — parameterized pytest tests, one per golden set entry. Metrics are instantiated fresh per test to avoid stale state. Generates `report.html` via `pytest_sessionfinish`.
+- `config.py` — display labels for the HTML report (`MODEL_NAME`, `JUDGE_MODEL_NAME`). Does not control which model is called.
+- `backends.py` — backend registry. Add a new backend here (function + one dict entry) without touching any other file.
+- `model.py` — `generate(prompt, system)` calls `backends.run()` with the model timeout.
+- `judge.py` — `LLMJudge` subclasses `DeepEvalBaseLLM` and calls `backends.run()` with the judge timeout.
+- `datasets/golden_set.py` — happy path ground truth (5 examples).
+- `datasets/regression_set.py` — `REGRESSION_SET` (edge_case, negative, ambiguous, robustness), `TECHNICAL_SET` (persona tests), and `STRUCTURED_SET` (JSON output tests).
+- `tests/test_golden_set.py` — parameterized pytest tests. Generates `report.html` via `pytest_sessionfinish`.
 
 **Metrics used:**
-- `AnswerRelevancyMetric` — does the response address the question?
-- `GEval (Correctness)` — factual correctness vs. expected output (applied to all examples)
-- `FaithfulnessMetric` — no hallucination beyond provided context (only applied when `context` is non-empty)
+- `AnswerRelevancyMetric` — does the response address the question? (skipped for negative/ambiguous categories)
+- `GEval (Correctness)` — factual correctness vs. expected output
+- `GEval (Simplicity)` — child-friendly language (persona tests only)
+- `GEval (FactualCompleteness)` — precise and complete answer (persona tests only)
+- `FaithfulnessMetric` — no hallucination beyond provided context
 
 **Environment:**
-Requires a `.env` file (copy from `.env.example`):
+Optional `.env` overrides:
 ```
-ANTHROPIC_API_KEY=...
-MODEL_NAME=claude-haiku-4-5-20251001       # optional override
-JUDGE_MODEL_NAME=claude-haiku-4-5-20251001 # optional override
+MODEL_BACKEND=claude            # default; "opencode_api" for OpenCode Zen direct API (free tier)
+MODEL_NAME=claude               # display label only
+JUDGE_MODEL_NAME=claude         # display label only
 ```

@@ -1,10 +1,14 @@
 import os
+import time
 import webbrowser
 from collections import defaultdict
+from html import escape
 
 import pytest
 
 from config import MODEL_NAME, JUDGE_MODEL_NAME
+
+_session_start_time = None
 
 CATEGORY_COLORS = {
     "happy_path": "#3498db",
@@ -13,6 +17,12 @@ CATEGORY_COLORS = {
     "ambiguous":  "#9b59b6",
     "robustness": "#1abc9c",
 }
+
+
+def pytest_sessionstart(session):
+    global _session_start_time
+    _session_start_time = time.time()
+
 
 # ------------------------------------------------------------------
 # Category markers
@@ -57,10 +67,37 @@ def hallucination_results():
 
 
 # ------------------------------------------------------------------
+# HTML helpers — module-level so they can be reused across sections
+# ------------------------------------------------------------------
+
+def score_color(passed):
+    return "#2ecc71" if passed else "#e74c3c"
+
+
+def score_badge(score, passed):
+    color = score_color(passed)
+    score_str = f"{score:.2f}" if score is not None else "N/A"
+    return (
+        f'<span style="background:{color};color:white;padding:3px 8px;'
+        f'border-radius:4px;display:inline-block;font-size:13px">{score_str}</span>'
+    )
+
+
+def sim_badge(sim):
+    if sim is None:
+        return "<span style='color:#aaa'>N/A</span>"
+    color = "#2ecc71" if sim >= 0.90 else ("#f39c12" if sim >= 0.70 else "#e74c3c")
+    return f'<span style="background:{color};color:white;padding:3px 8px;border-radius:4px;font-size:13px">{sim:.2f}</span>'
+
+
+# ------------------------------------------------------------------
 # HTML report — written once after all tests finish
 # ------------------------------------------------------------------
 
 def pytest_sessionfinish(session, exitstatus):
+    elapsed = time.time() - _session_start_time if _session_start_time else 0
+    elapsed_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
+
     results = _report_results
     personas = _persona_results
     structured = _structured_results
@@ -68,9 +105,6 @@ def pytest_sessionfinish(session, exitstatus):
 
     if not results and not personas and not structured and not hallucinations:
         return
-
-    def score_color(passed):
-        return "#2ecc71" if passed else "#e74c3c"
 
     # --- Main results table ---
     by_category = defaultdict(list)
@@ -83,7 +117,7 @@ def pytest_sessionfinish(session, exitstatus):
         color = CATEGORY_COLORS.get(cat, "#aaa")
         summary_rows += f"""
         <tr>
-          <td><span style="background:{color};color:white;padding:2px 8px;border-radius:4px">{cat}</span></td>
+          <td><span style="background:{color};color:white;padding:2px 8px;border-radius:4px">{escape(cat)}</span></td>
           <td>{passed_in_cat}/{len(items)}</td>
         </tr>"""
 
@@ -96,72 +130,58 @@ def pytest_sessionfinish(session, exitstatus):
             badges += (
                 f'<span style="background:{color};color:white;padding:3px 8px;'
                 f'border-radius:4px;margin:2px;display:inline-block;font-size:13px">'
-                f'{name}: {score_str}</span>'
+                f'{escape(name)}: {score_str}</span>'
             )
 
-        sim = r.get("similarity")
-        if sim is not None:
-            sim_color = "#2ecc71" if sim >= 0.90 else ("#f39c12" if sim >= 0.70 else "#e74c3c")
-            sim_badge = f'<span style="background:{sim_color};color:white;padding:3px 8px;border-radius:4px;font-size:13px">{sim:.2f}</span>'
-        else:
-            sim_badge = "<span style='color:#aaa'>N/A</span>"
-
         cat_color = CATEGORY_COLORS.get(r["category"], "#aaa")
-        cat_badge = f'<span style="background:{cat_color};color:white;padding:2px 8px;border-radius:4px;font-size:12px">{r["category"]}</span>'
+        cat_badge = f'<span style="background:{cat_color};color:white;padding:2px 8px;border-radius:4px;font-size:12px">{escape(r["category"])}</span>'
         result_color = score_color(r["passed"])
         result_text = "PASS" if r["passed"] else "FAIL"
         rows += f"""
         <tr>
           <td>{cat_badge}</td>
-          <td>{r['input']}</td>
-          <td>{r['actual_output']}</td>
-          <td>{r['expected_output']}</td>
-          <td>{sim_badge}</td>
+          <td>{escape(r['input'])}</td>
+          <td>{escape(r['actual_output'])}</td>
+          <td>{escape(r['expected_output'])}</td>
+          <td>{sim_badge(r.get('similarity'))}</td>
           <td>{badges}</td>
           <td style="color:{result_color};font-weight:bold">{result_text}</td>
         </tr>"""
 
-    all_results = results + hallucinations
+    all_results = results + hallucinations + structured
     total = len(all_results)
     passed_count = sum(1 for r in all_results if r["passed"])
     summary_class = "pass" if passed_count == total else "fail"
 
-    # --- Judge persona comparison table ---
+    # --- Persona tests table ---
     persona_rows = ""
     for r in personas:
-        linguist_score, linguist_pass = r["scores"].get("ElementaryStudentJudge", (None, False))
-        factchecker_score, factchecker_pass = r["scores"].get("FactCheckerJudge", (None, False))
-
-        def badge(score, passed):
-            color = score_color(passed)
-            score_str = f"{score:.2f}" if score is not None else "N/A"
-            return (
-                f'<span style="background:{color};color:white;padding:3px 8px;'
-                f'border-radius:4px;display:inline-block;font-size:13px">{score_str}</span>'
-            )
-
+        simplicity_score, simplicity_pass = r["simplicity_score"]
+        factual_score, factual_pass = r["factual_score"]
         persona_rows += f"""
         <tr>
-          <td>{r['input']}</td>
-          <td>{r['actual_output']}</td>
-          <td>{badge(linguist_score, linguist_pass)}</td>
-          <td>{badge(factchecker_score, factchecker_pass)}</td>
+          <td>{escape(r['input'])}</td>
+          <td>{escape(r['student_output'])}</td>
+          <td>{score_badge(simplicity_score, simplicity_pass)}</td>
+          <td>{escape(r['factual_output'])}</td>
+          <td>{score_badge(factual_score, factual_pass)}</td>
         </tr>"""
 
     persona_section = ""
     if persona_rows:
         persona_section = f"""
-  <h2>Judge Persona Comparison (happy_path)</h2>
+  <h2>Persona Tests — Model Adapts to Audience</h2>
   <p style="color:#555;font-size:14px">
-    <strong>ElementaryStudentJudge</strong> scores on simplicity — would an elementary school student understand this? &nbsp;|&nbsp;
-    <strong>FactCheckerJudge</strong> scores only on whether the core fact is present.
+    The model is called twice per question: once told to explain to an elementary school student,
+    once told to be factually precise. A neutral judge scores each response on the appropriate criterion.
   </p>
   <table>
     <tr>
       <th>Input</th>
-      <th>Actual Output</th>
-      <th>ElementaryStudentJudge</th>
-      <th>FactCheckerJudge</th>
+      <th>Student Response</th>
+      <th>Simplicity</th>
+      <th>Factual Response</th>
+      <th>Factual Completeness</th>
     </tr>
     {persona_rows}
   </table>"""
@@ -179,16 +199,16 @@ def pytest_sessionfinish(session, exitstatus):
             color = "#2ecc71" if match else "#e74c3c"
             key_checks += (
                 f'<div style="font-size:12px;margin:2px 0">'
-                f'<strong>{key}:</strong> '
-                f'<span style="color:{color}">{actual_val!r}</span>'
+                f'<strong>{escape(key)}:</strong> '
+                f'<span style="color:{color}">{escape(repr(actual_val))}</span>'
                 f'</div>'
             )
         result_color = score_color(r["passed"])
         result_text = "PASS" if r["passed"] else "FAIL"
         structured_rows += f"""
         <tr>
-          <td>{r['input']}</td>
-          <td><code style="font-size:12px;word-break:break-all">{r['actual_output']}</code></td>
+          <td>{escape(r['input'])}</td>
+          <td><code style="font-size:12px;word-break:break-all">{escape(r['actual_output'])}</code></td>
           <td>{valid_badge}</td>
           <td>{key_checks}</td>
           <td style="color:{result_color};font-weight:bold">{result_text}</td>
@@ -229,23 +249,17 @@ def pytest_sessionfinish(session, exitstatus):
             badges += (
                 f'<span style="background:{color};color:white;padding:3px 8px;'
                 f'border-radius:4px;margin:2px;display:inline-block;font-size:13px">'
-                f'{name}: {score_str}</span>'
+                f'{escape(name)}: {score_str}</span>'
             )
-        sim = r.get("similarity")
-        if sim is not None:
-            sim_color = "#2ecc71" if sim >= 0.90 else ("#f39c12" if sim >= 0.70 else "#e74c3c")
-            sim_badge = f'<span style="background:{sim_color};color:white;padding:3px 8px;border-radius:4px;font-size:13px">{sim:.2f}</span>'
-        else:
-            sim_badge = "<span style='color:#aaa'>N/A</span>"
         result_color = score_color(r["passed"])
         result_text = "PASS" if r["passed"] else "FAIL"
         hallucination_rows += f"""
         <tr>
           <td>{answerable_badge}</td>
-          <td>{r['input']}</td>
-          <td>{r['actual_output']}</td>
-          <td>{r['expected_output']}</td>
-          <td>{sim_badge}</td>
+          <td>{escape(r['input'])}</td>
+          <td>{escape(r['actual_output'])}</td>
+          <td>{escape(r['expected_output'])}</td>
+          <td>{sim_badge(r.get('similarity'))}</td>
           <td>{badges}</td>
           <td style="color:{result_color};font-weight:bold">{result_text}</td>
         </tr>"""
@@ -294,9 +308,10 @@ def pytest_sessionfinish(session, exitstatus):
 <body>
   <h1>DeepEval Report</h1>
   <div class="summary">
-    Model: <strong>{MODEL_NAME}</strong> &nbsp;|&nbsp;
-    Judge: <strong>{JUDGE_MODEL_NAME}</strong> &nbsp;|&nbsp;
-    Results: <span class="{summary_class}">{passed_count}/{total} passed</span>
+    Model: <strong>{escape(MODEL_NAME)}</strong> &nbsp;|&nbsp;
+    Judge: <strong>{escape(JUDGE_MODEL_NAME)}</strong> &nbsp;|&nbsp;
+    Results: <span class="{summary_class}">{passed_count}/{total} passed</span> &nbsp;|&nbsp;
+    Duration: <strong>{elapsed_str}</strong>
   </div>
 
   <h2>Summary by Category</h2>
