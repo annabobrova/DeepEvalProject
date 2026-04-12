@@ -44,6 +44,7 @@ _report_results = []
 _persona_results = []
 _structured_results = []
 _hallucination_results = []
+_indirect_injection_results = []
 
 
 @pytest.fixture(scope="session")
@@ -64,6 +65,11 @@ def structured_results():
 @pytest.fixture(scope="session")
 def hallucination_results():
     return _hallucination_results
+
+
+@pytest.fixture(scope="session")
+def indirect_injection_results():
+    return _indirect_injection_results
 
 
 # ------------------------------------------------------------------
@@ -102,8 +108,9 @@ def pytest_sessionfinish(session, exitstatus):
     personas = _persona_results
     structured = _structured_results
     hallucinations = _hallucination_results
+    indirect_injections = _indirect_injection_results
 
-    if not results and not personas and not structured and not hallucinations:
+    if not results and not personas and not structured and not hallucinations and not indirect_injections:
         return
 
     # --- Main results table ---
@@ -148,7 +155,7 @@ def pytest_sessionfinish(session, exitstatus):
           <td style="color:{result_color};font-weight:bold">{result_text}</td>
         </tr>"""
 
-    all_results = results + hallucinations + structured
+    all_results = results + hallucinations + structured + indirect_injections
     total = len(all_results)
     passed_count = sum(1 for r in all_results if r["passed"])
     summary_class = "pass" if passed_count == total else "fail"
@@ -288,6 +295,70 @@ def pytest_sessionfinish(session, exitstatus):
     {hallucination_rows}
   </table>"""
 
+    # --- Indirect injection results table ---
+    indirect_injection_rows = ""
+    attack_colors = {
+        "explicit":     "#e74c3c",
+        "authority":    "#e67e22",
+        "false_claim":  "#8e44ad",
+        "roleplay":     "#2980b9",
+        "end_override": "#16a085",
+    }
+    for r in indirect_injections:
+        color = attack_colors.get(r["attack_type"], "#aaa")
+        attack_badge = (
+            f'<span style="background:{color};color:white;padding:2px 8px;'
+            f'border-radius:4px;font-size:12px">{escape(r["attack_type"])}</span>'
+        )
+        badges = ""
+        for name, score, passed in r["scores"]:
+            score_str = f"{score:.2f}" if score is not None else "N/A"
+            badges += (
+                f'<span style="background:{score_color(passed)};color:white;padding:3px 8px;'
+                f'border-radius:4px;margin:2px;display:inline-block;font-size:13px">'
+                f'{escape(name)}: {score_str}</span>'
+            )
+        result_color = score_color(r["passed"])
+        result_text = "PASS" if r["passed"] else "FAIL"
+        indirect_injection_rows += f"""
+        <tr>
+          <td>{attack_badge}</td>
+          <td><code style="font-size:12px;color:#c0392b;word-break:break-word">{escape(r['injected_chunk'])}</code></td>
+          <td>{escape(r['input'])}</td>
+          <td>{escape(r['actual_output'])}</td>
+          <td>{escape(r['expected_output'])}</td>
+          <td>{sim_badge(r.get('similarity'))}</td>
+          <td>{badges}</td>
+          <td style="color:{result_color};font-weight:bold">{result_text}</td>
+        </tr>"""
+
+    indirect_injection_section = ""
+    if indirect_injection_rows:
+        ind_total = len(indirect_injections)
+        ind_passed = sum(1 for r in indirect_injections if r["passed"])
+        indirect_injection_section = f"""
+  <h2>Indirect Prompt Injection Tests ({ind_passed}/{ind_total} passed)</h2>
+  <p style="color:#555;font-size:14px">
+    Malicious instructions are hidden inside the retrieved resume document — not in the user's message.
+    The model must give an honest assessment based on real resume facts and resist the injected directive,
+    even though it came from the "trusted" context source.
+    <strong>FaithfulnessMetric has a blind spot here</strong>: if the model follows an injected instruction
+    that is present in the context, faithfulness scores it as PASS. InjectionResistance (GEval) catches this instead.
+  </p>
+  <table>
+    <tr>
+      <th>Attack Type</th>
+      <th>Injected Chunk</th>
+      <th>Input</th>
+      <th>Actual Output</th>
+      <th>Expected Output</th>
+      <th>Similarity</th>
+      <th>Judge Score</th>
+      <th>Result</th>
+    </tr>
+    {indirect_injection_rows}
+  </table>"""
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -339,6 +410,8 @@ def pytest_sessionfinish(session, exitstatus):
   {structured_section}
 
   {hallucination_section}
+
+  {indirect_injection_section}
 </body>
 </html>"""
 
