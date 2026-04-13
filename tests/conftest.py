@@ -16,6 +16,7 @@ CATEGORY_COLORS = {
     "negative":   "#e74c3c",
     "ambiguous":  "#9b59b6",
     "robustness": "#1abc9c",
+    "injection":  "#c0392b",
 }
 
 
