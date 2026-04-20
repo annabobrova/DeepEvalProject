@@ -68,6 +68,8 @@ DeepEvalProject/
 ├── model.py                       # generate(prompt, system) → str, delegates to backends.run()
 ├── judge.py                       # LLMJudge — neutral LLM-as-a-judge, delegates to backends.run()
 ├── similarity.py                  # cosine similarity via sentence-transformers
+├── ragas_config.py                # RAGAs LLM + embeddings wrappers (LangChain format)
+├── ragas_eval.py                  # standalone RAGAs evaluation runner (python3.11 ragas_eval.py)
 ├── pytest.ini                     # category marker registration
 ├── requirements.txt
 └── .env
@@ -221,6 +223,42 @@ Five attack types are tested:
 **Key finding:** Telling the model "answer only from this document" is not enough. The model trusted authority-sounding directives and plausible false facts embedded in the context. Results vary between runs — resistance is non-deterministic, which is itself a risk.
 
 **Why FaithfulnessMetric cannot catch this:** If the model follows an injected instruction that is technically present in the retrieved context, FaithfulnessMetric will score it as PASS — the answer is "grounded in the context." The `InjectionResistance` GEval metric is used instead, which evaluates whether the model gave an honest answer based on real resume facts versus following a malicious directive.
+
+## RAGAs evaluation
+
+[RAGAs](https://docs.ragas.io/) is a separate evaluation framework purpose-built for RAG pipelines. Unlike DeepEval (which uses pytest and lets you write custom GEval criteria), RAGAs runs fixed metric formulas and is invoked as a plain Python script.
+
+```bash
+python3.11 ragas_eval.py
+```
+
+This runs 3 metrics against `HALLUCINATION_SET` (the same 10 resume questions used by the DeepEval hallucination tests):
+
+| Metric | What it measures | How it works |
+|---|---|---|
+| `Faithfulness` | Are the model's claims supported by the retrieved context? | LLM decomposes the answer into claims, checks each against the context |
+| `AnswerRelevancy` | Does the answer address the question? | Embeddings-based (not LLM) — measures semantic overlap between question and answer |
+| `LLMContextRecall` | Does the retrieved context contain enough to answer? | LLM decomposes the reference answer into claims, checks which are present in the context |
+
+**How RAGAs differs from DeepEval:**
+
+| | DeepEval | RAGAs |
+|---|---|---|
+| Interface | pytest | standalone script |
+| Custom criteria | Yes — write any GEval criteria in natural language | No — fixed metric formulas |
+| Faithfulness | FaithfulnessMetric | Faithfulness (same idea, different implementation) |
+| Context quality | Not used | LLMContextRecall, ContextPrecision |
+| Embeddings | Only for semantic similarity (local) | Built into AnswerRelevancy metric |
+
+**To add more metrics** — import from `ragas.metrics.collections` and append to the list in `ragas_eval.py`:
+```python
+from ragas.metrics.collections import ContextPrecision
+metrics = [..., ContextPrecision(llm=ragas_llm)]
+```
+
+Key files:
+- `ragas_config.py` — wires the LLM and embeddings wrappers RAGAs needs
+- `ragas_eval.py` — the evaluation runner
 
 ## Semantic similarity
 

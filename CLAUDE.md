@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Important Rules
 
 - **Always run tests with report generation.** Never run tests without the full `pytest_sessionfinish` report pipeline. Use the commands below as-is — do not add flags that suppress output or skip session teardown.
+- **New tests must appear in the report.** Any new test added to `tests/test_golden_set.py` must also produce output in `report.html`. Add the result to the appropriate session-scoped list in `conftest.py` and render it in `pytest_sessionfinish`. For RAGAs tests, results must appear in `ragas_report.html`.
 - **Always update README.md after code changes.** Any change to architecture, file structure, backends, metrics, or test design must be reflected in README.md before the task is considered done.
 - **Speak up if a requested approach is not the best solution.** If a better alternative exists, say so before implementing.
 - **Keep the project simple and easy to read.** Push back on any change that adds complexity without clear necessity. This project is a learning tool — clarity matters more than completeness.
