@@ -2,6 +2,8 @@
 
 A production-style evaluation framework for testing Large Language Models using [DeepEval](https://docs.confident-ai.com/). This project demonstrates how to systematically measure LLM quality across multiple dimensions — from factual correctness to robustness — and how the choice of judge and persona significantly affects scores.
 
+For a plain-language walkthrough of the RAGAs evaluation flow, see [docs/RAGAS_WORKFLOW.md](docs/RAGAS_WORKFLOW.md).
+
 ## What this project demonstrates
 
 - **How to build a golden set (ground truth dataset).** A golden set is a curated list of inputs paired with the ideal expected outputs. It is the foundation of any LLM evaluation — without known-correct answers, you cannot measure whether the model is right or wrong. This project separates the golden set (happy path only) from a regression set (edge cases, negative, ambiguous, robustness, injection) so each can be run independently.

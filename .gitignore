@@ -10,6 +10,8 @@ __pycache__/
 
 # Reports
 report.html
+ragas_report.html
+docs/LLM_Evaluation_Project_Overview.pdf
 
 # pytest
 .pytest_cache/
